@@ -8,16 +8,23 @@ from lib.models import load_backbone, load_classifier
 from lib.datasets import get_dataloader
 from lib.utils import AverageMeter, cal_acc
 from config import get_args
+import os
+from data_loader_pin_space import CustomImageDataset
+
 
 def main(args):
-    model_save_root = osp.join(args.output_folder, args.cls_model_name)
+    model_save_root = os.path.join('/mnt/Data/hanoch/runs/dinov2_classifier', args.cls_model_name) #osp.join(args.output_folder, args.cls_model_name)
 
     backbone = load_backbone(model=args.backbone_model)
     classifier = load_classifier(args.fc_dim)
 
     optimizer = optim.AdamW(classifier.parameters(), lr=1e-3)
     ce_loss = nn.CrossEntropyLoss()
-    
+    if 0:
+        global_crops_size = 518
+        train_dataloader = CustomImageDataset(train_dataset_str, transform=train_transform, crop_size=global_crops_size)
+        dataloader = DataLoader(train_dataloader, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+
     train_dataloader = get_dataloader(batch_size=64, shuffle=True, num_workers=4, mode="train", split=args.split, model=args.backbone_model)
     valid_dataloader = get_dataloader(batch_size=64, shuffle=False, num_workers=4, mode="valid", split=args.split, model=args.backbone_model)
 

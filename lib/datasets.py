@@ -8,8 +8,8 @@ import torchvision.transforms as T
 class Flower(Dataset):
     def __init__(self, mode="train", split="1", model="dinov2"):
         super().__init__()
-        self.img_root = "data/Flower/jpg"
-        mat = scipy.io.loadmat('data/Flower/datasplits.mat')
+        self.img_root = "/mnt/Data/hanoch/flower/jpg"
+        mat = scipy.io.loadmat('/mnt/Data/hanoch/flower/datasplits.mat')
         
         if mode == "train":
             self.indices = mat[f"trn{split}"][0]

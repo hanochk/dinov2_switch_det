@@ -2,3 +2,7 @@ scipy
 opencv-python
 scikit-learn
 matplotlib
+torch==2.4.0
+torchvision
+omegaconf
+torchmetrics==0.10.3
