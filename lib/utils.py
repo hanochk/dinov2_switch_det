@@ -26,7 +26,7 @@ def cal_acc(y_pred, y_true, threshold=0.7):
     correct = ((y_pred_labels == y_true) & (max_probs >= threshold)).sum()
     incorrect = (max_probs < threshold).sum()
 
-    err_ind = np.where((max_probs < threshold))[0]
+    err_ind = np.where ((y_pred_labels != y_true))[0]#np.where((max_probs < threshold))[0]
     conf_acm = list()
     if len(err_ind) > 0:
         for ii in err_ind:

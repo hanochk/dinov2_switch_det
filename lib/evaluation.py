@@ -153,6 +153,7 @@ def roc_plot(labels, predictions, positive_label, save_dir, thresholds_every=5, 
 
     filename = unique_id + 'roc_curve.png'
     plt.savefig(os.path.join(save_dir, filename), format="png")
+    return auc
 
 def p_r_plot_multi_class(all_targets, all_predictions, save_dir, thresholds_every_in=5, unique_id=None):
     # Precision recall  assumes positive label is 0 namely FINGER_IDX=0 or equivalently positive_label = 1
@@ -302,8 +303,9 @@ def accuracy_calc(save_dir, labels_acm, predictions_acm, roc_plot_en=False):
     predictions = np.argmax(np.concatenate(predictions_acm), axis=1)
     acc = accuracy_score(y_pred=predictions, y_true=np.concatenate(labels_acm))
     print(acc)
+    auc = -1
     if roc_plot_en:
-        roc_plot(np.concatenate(labels_acm), np.concatenate(predictions_acm)[:, positive_label],
+        auc = roc_plot(np.concatenate(labels_acm), np.concatenate(predictions_acm)[:, positive_label],
                  positive_label=positive_label, save_dir=save_dir)
-    return acc
+    return acc, auc
     # def roc_plot(labels, predictions, positive_label, save_dir, thresholds_every=5, unique_id=''):

@@ -16,6 +16,11 @@ def get_args():
     parser.add_argument('--project', default='runs/train', help='save to project/name')
     parser.add_argument('--linear-lr', action='store_true', help='linear LR')
     parser.add_argument('--num-workers', type=int, default=8, help='maximum number of dataloader workers')
+    parser.add_argument('--global-crops-size', type=int, default=-1, help='')
+    parser.add_argument('--var-hidden-dim', action='store_true', help='')
+
+
+
 
 
 

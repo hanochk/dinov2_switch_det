@@ -12,6 +12,7 @@ LABEL_MAP = {
     "far_pin_space_RIGHT" : 1
 }
 from torch.utils.data import Dataset, DataLoader
+import albumentations as A
 
 collect_metadata = True
 import pandas as pd
@@ -43,19 +44,23 @@ class CustomImageDataset(Dataset):
                 transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)
             ])
         # if model == "dinov2":
-        mean = [0.485, 0.456, 0.406]
-        std = [0.229, 0.224, 0.225]
+        # mean = [0.485, 0.456, 0.406] # imageNet
+        mean = [0.39933288, 0.34880158, 0.28759238] # railvision
+        # std = [0.229, 0.224, 0.225]
+        std = [0.19252066, 0.18807131, 0.20751753]
 
         normalize = transforms.Normalize(mean=mean, std=std)
-        # elif model == "resnet50":
-        #     normalize = T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-
         self.transform = transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Resize(crop_size),
-                transforms.CenterCrop(crop_size),
+                transforms.Resize((crop_size, crop_size)),
+                # transforms.ColorJitter(brightness=(0.6, 1.4), contrast=(0.6, 1.4), saturation=(0.6, 1.4)),
+                transforms.ColorJitter(brightness=0.25, contrast=0.2, saturation=0.2, hue=0.1),  # https://github.com/facebookresearch/dinov2/blob/e1277af2ba9496fbadf7aec6eba56e8d882d1e35/dinov2/data/augmentations.py#L64
+                # transforms.CenterCrop(crop_size),
                 normalize,
             ])
+        # HK TODO
+        # A.PadIfNeeded(min_height=448, min_width=448),
+
         # train_transform = Compose([
         #     RandomResizedCrop(size=(crop_size, crop_size), scale=(0.08, 1.0), ratio=(0.75, 1.3333), interpolation=interpolation),
         #     RandomHorizontalFlip(p=0.5),
@@ -119,4 +124,14 @@ train_transform = Compose([
     ToTensor(),
     Normalize(mean=mean, std=std),
 ])
+
+m_acm = list()
+for ix , (imgs, labels, unnorm_img) in enumerate(tqdm(train_dataloader)):
+    m_acm.append(unnorm_img.mean(dim=[0, 2, 3]).detach().cpu().numpy())
+print(np.stack(m_acm).mean(0))
+
+std_acm = list()
+for ix , (imgs, labels, unnorm_img) in enumerate(tqdm(train_dataloader)):
+    std_acm.append(unnorm_img.std(dim=[0, 2, 3]).detach().cpu().numpy())
+np.stack(std_acm).mean(0)
 """

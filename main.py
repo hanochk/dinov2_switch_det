@@ -17,13 +17,16 @@ from pathlib import Path
 import math
 import torch.optim.lr_scheduler as lr_scheduler
 import yaml
+from torchinfo import summary
 
 def main(args):
     # base_save_path =
     # HK TODO add Wdecay, dropout, cosine anealing, or lr decay
     debug = True
     flavour = 'base'
-
+    overfitting_test = False
+    if overfitting_test:
+        print('overfitting test', 19*'=')
     # train_set_path = '/mnt/Data/hanoch/back_switch/sw_v0.7_bsw_v2.8/train'
     # val_set_path = '/mnt/Data/hanoch/back_switch/backswitch_detection/validation'
     # test_set_path = '/mnt/Data/hanoch/back_switch/sw_v0.7_bsw_v2.8/test'
@@ -44,6 +47,8 @@ def main(args):
     else:
         raise ValueError('Unknown backbone model')
 
+    if args.global_crops_size > 0:
+        global_crops_size = args.global_crops_size
 
     ce_loss = nn.CrossEntropyLoss()
     if args.task !='test':
@@ -57,6 +62,8 @@ def main(args):
         if not os.path.exists(args.save_dir):
             os.makedirs(args.save_dir)
 
+        print('Saved dir ==========================', args.save_dir)
+
         results_file = os.path.join(args.save_dir , 'results.txt')
 
         with open(os.path.join(args.save_dir ,  'opt.yaml'), 'w') as f:
@@ -68,7 +75,17 @@ def main(args):
         if not os.path.exists(debug_save_path):
             os.makedirs(debug_save_path)
 
-        classifier = load_classifier(fc_dim, n_cls=2, dropout=args.dropout) # Flower is 17
+        classifier = load_classifier(fc_dim, n_cls=2, dropout=args.dropout, var_hidden_dim=args.var_hidden_dim)
+        classifier.eval()# Flower is 17
+        # summary(classifier, input_size=(1, fc_dim), verbose=0) # (batch_size, channels, height, width)
+        print(f"Model fc_dim: {classifier.fc_dim}")
+
+        # Save summary into a file
+        model_summary = summary(classifier, input_size=(1, fc_dim), verbose=0)  # verbose=0 to return as a string
+        with open(os.path.join(args.save_dir, "model_summary.txt"), "w") as f:
+            f.write(f"Model fc_dim: {classifier.fc_dim}\n")
+            f.write(str(model_summary))
+
         optimizer = optim.AdamW(classifier.parameters(), lr=args.lr)
 
         scheduler = lr_scheduler_setup(optimizer, linear_lr=args.linear_lr, start_epoch = 0)
@@ -92,21 +109,26 @@ def main(args):
             print("Val Class 0, 1 distribution",
                np.unique([x[1] for x in valid_dataloader.dataset.samples], return_counts=True))
 
+            if overfitting_test:
+                train_dataloader.dataset.samples = train_dataloader.dataset.samples[:16] + train_dataloader.dataset.samples[-16:]
+                valid_dataloader.dataset.samples = train_dataloader.dataset.samples
         # train_dataloader = CustomImageDataset(train_set_path, transform=train_transform, crop_size=global_crops_size)
             # train_dataloader = DataLoader(train_dataloader, batch_size=batch_size, shuffle=shuffle, num_workers=args.num_workers)
         else:
             train_dataloader = get_dataloader(batch_size=64, shuffle=True, num_workers=4, mode="train", split=args.split, model=args.backbone_model)
             valid_dataloader = get_dataloader(batch_size=64, shuffle=False, num_workers=4, mode="valid", split=args.split, model=args.backbone_model)
 
+        backbone.eval()
         best_acc = 0
         for epoch in range(args.epoch):
+            classifier.train()
             train_losses = AverageMeter()
             train_acces = AverageMeter()
             for ix , (imgs, labels, unnorm_img) in enumerate(tqdm(train_dataloader)):
                 # if debug:
                 #     for ii, img in enumerate(imgs):
                 #         cv2.imwrite(os.path.join(debug_save_path, str(ii+ix*args.batch_size)+ '.png'), img.detach().cpu().permute(1, 2, 0).numpy()*255)
-
+                # cv2.imwrite(os.path.join(debug_save_path, str('img0')+ '.png'), cv2.cvtColor(train_dataloader.dataset.__getitem__(0)[2].permute(1,2,0).cpu().numpy()*255, cv2.COLOR_RGB2BGR))
                 imgs = imgs.cuda()
                 labels = labels.cuda()
                 bs = imgs.shape[0]
@@ -124,7 +146,7 @@ def main(args):
                 last_lr = scheduler.get_last_lr()
 
             scheduler.step() # lr step
-            print(last_lr)
+            print('last_lr :', last_lr)
 
             valid_losses = AverageMeter()
             valid_acces = AverageMeter()
@@ -132,6 +154,7 @@ def main(args):
             predictions_acm = list()
 
             with torch.no_grad():
+                classifier.eval()
                 for imgs, labels, unnorm_img in valid_dataloader:
                     imgs = imgs.cuda()
                     labels = labels.cuda()
@@ -148,14 +171,14 @@ def main(args):
                     valid_acces.update(acc, bs)
 
 
-            acc = accuracy_calc(args.save_dir, labels_acm, predictions_acm, roc_plot_en=False)
+            acc_val, _ = accuracy_calc(args.save_dir, labels_acm, predictions_acm, roc_plot_en=False)
 
             s = ('%10s' * 1 + '%10.4g' * 3) % (
-                '%g/%g' % (epoch, args.epoch - 1), acc, labels.shape[0], imgs.shape[-1])
+                '%g/%g' % (epoch, args.epoch - 1), acc, train_losses.avg, valid_losses.avg)
             with open(results_file, 'a') as f:
                 f.write(s + '\n')  # append metrics, val_loss
 
-            print(f"Epoch: {epoch+1} | train loss: {train_losses.avg:.4f} | train acc: {acc*100:.1f} | valid loss: {valid_losses.avg:.4f} | valid acc: {valid_acces.avg*100:.1f} ")
+            print(f"Epoch: {epoch+1} | train loss: {train_losses.avg:.4f} | train acc: {acc*100:.1f} | valid loss: {valid_losses.avg:.4f} | valid acc: {acc_val*100:.1f} ")
 
             if valid_acces.avg > best_acc:
                 best_acc = valid_acces.avg
@@ -166,24 +189,43 @@ def main(args):
                                        args.cls_model_name)  # osp.join(args.output_folder, args.cls_model_name)
 
         args.save_dir = args.output_folder
-        results_file = os.path.join(args.save_dir , 'results.txt')
+        debug_save_path = os.path.join(args.save_dir, 'images')
+        if not os.path.exists(debug_save_path):
+            os.makedirs(debug_save_path)
 
-
-    # Test set
-    plot_err_ex = False
-    classifier = load_classifier(fc_dim, n_cls=2, checkpoint=model_save_root)
     if 1:
-        test_dataloader = create_dataloader(test_set_path, crop_size=global_crops_size, num_workers=args.num_workers, batch_size=64, shuffle=False)
+        test_dataloader = create_dataloader(test_set_path, crop_size=global_crops_size, num_workers=args.num_workers,
+                                            batch_size=64, shuffle=False)
         test_dataloader.dataset.df.to_csv(os.path.join(args.save_dir, 'test_set.csv'))
+
+        roc_plot_en = True
+        if overfitting_test:
+            roc_plot_en = False
+            test_dataloader.dataset.samples = train_dataloader.dataset.samples
+
         print("Class 0, 1 distribution", np.unique([x[1] for x in test_dataloader.dataset.samples], return_counts=True))
     else:
-        test_dataloader = get_dataloader(batch_size=64, shuffle=False, num_workers=4, mode="train", split=args.split, model=args.backbone_model)
+        test_dataloader = get_dataloader(batch_size=64, shuffle=False, num_workers=4, mode="train", split=args.split,
+                                         model=args.backbone_model)
 
+
+
+    test_eval(args, backbone, ce_loss, debug_save_path, fc_dim,
+              global_crops_size, model_save_root, test_dataloader, roc_plot_en=roc_plot_en)
+
+
+def test_eval(args, backbone, ce_loss, debug_save_path, fc_dim, global_crops_size, model_save_root,
+              test_dataloader, roc_plot_en=True):
+    # Test set
+    plot_err_ex = False
+    classifier = load_classifier(fc_dim, n_cls=2, checkpoint=model_save_root, var_hidden_dim=args.var_hidden_dim)
+    backbone.eval()
     test_losses = AverageMeter()
     test_acces = AverageMeter()
     labels_acm = list()
     predictions_acm = list()
     with torch.no_grad():
+        classifier.eval()
         for ix, (imgs, labels, unnorm_img) in enumerate(tqdm(test_dataloader)):
             imgs = imgs.cuda()
             labels = labels.cuda()
@@ -199,21 +241,20 @@ def main(args):
             if plot_err_ex:
                 if any(err_dict['err_ind']):
                     for ii, conf in zip(err_dict['err_ind'], err_dict['conf_acm']):
-                        cv2.imwrite(os.path.join(debug_save_path, str(ix*args.batch_size+ii)+ '_'+str(conf)+ '.png'), unnorm_img[ii,...].detach().cpu().permute(1, 2, 0).numpy()*255)
+                        # cv2.imwrite(os.path.join(debug_save_path, str(ix*args.batch_size+ii)+ '_'+str(conf)+ '.png'), unnorm_img[ii,...].detach().cpu().permute(1, 2, 0).numpy()*255)
+                        cv2.imwrite(
+                            os.path.join(debug_save_path, str(ix * args.batch_size + ii) + '_' + str(conf) + '.png'),
+                            cv2.cvtColor(unnorm_img[ii, ...].detach().cpu().permute(1, 2, 0).numpy() * 255,
+                                         cv2.COLOR_RGB2BGR))
 
             test_acces.update(acc, bs)
-
-    acc = accuracy_calc(args.save_dir, labels_acm, predictions_acm, roc_plot_en=True)
-
+    acc_test, auc_test = accuracy_calc(args.save_dir, labels_acm, predictions_acm, roc_plot_en=roc_plot_en)
     test_results_file = os.path.join(args.save_dir, 'test_results.txt')
-
     s = ('%10s' * 1 + '%10.4g' * 3) % (
-        '%g/%g' % (1, 1), acc, labels.shape[0], imgs.shape[-1])
-
+        '%g/%g' % (1, 1), acc_test, auc_test, imgs.shape[-1])
     with open(test_results_file, 'a') as f:
         f.write(s + '\n')  # append metrics, val_loss
-
-    print(f"Test loss: {test_losses.avg:.4f} | test acc: {acc*100:.1f}")
+    print(f"Test loss: {test_losses.avg:.4f} | test acc: {acc_test * 100:.1f}")
 
 
 def lr_scheduler_setup(optimizer, linear_lr=True, start_epoch=0):
