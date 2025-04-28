@@ -121,7 +121,7 @@ def roc_plot(labels, predictions, positive_label, save_dir, thresholds_every=5, 
                                             pos_label=positive_label)
 
     auc = sklearn.metrics.roc_auc_score(labels, predictions) # TODO consider replace with metrics.auc(fpr, tpr) since it has the label built in implicit
-    print("AUC: {}".format(auc))
+    # print("AUC: {}".format(auc))
     granularity_percentage = 1. / labels.shape[0] *100
     lw = 2
     n_labels = len(labels)
@@ -298,14 +298,14 @@ def plot_tsne(all_targets, all_features, path):
     plt.savefig(os.path.join(path, 'tsne_' 'p_' + str(perplexity) + '.png'))
 
 
-def accuracy_calc(save_dir, labels_acm, predictions_acm, roc_plot_en=False):
+def accuracy_calc(save_dir, labels_acm, predictions_acm, roc_plot_en=False, unique_id='test'):
     positive_label = 1
     predictions = np.argmax(np.concatenate(predictions_acm), axis=1)
     acc = accuracy_score(y_pred=predictions, y_true=np.concatenate(labels_acm))
-    print(acc)
+    # print(acc)
     auc = -1
     if roc_plot_en:
         auc = roc_plot(np.concatenate(labels_acm), np.concatenate(predictions_acm)[:, positive_label],
-                 positive_label=positive_label, save_dir=save_dir)
+                 positive_label=positive_label, save_dir=save_dir, unique_id=unique_id)
     return acc, auc
     # def roc_plot(labels, predictions, positive_label, save_dir, thresholds_every=5, unique_id=''):

@@ -48,7 +48,9 @@ def main(args):
         raise ValueError('Unknown backbone model')
 
     if args.global_crops_size > 0:
-        global_crops_size = args.global_crops_size
+        global_crops_size = args.global_crops_size # set by outside
+    else:
+        args.global_crops_size = global_crops_size # save the current to opt=>yaml file
 
     ce_loss = nn.CrossEntropyLoss()
     if args.task !='test':
@@ -124,6 +126,9 @@ def main(args):
             classifier.train()
             train_losses = AverageMeter()
             train_acces = AverageMeter()
+            labels_acm = list()
+            predictions_acm = list()
+
             for ix , (imgs, labels, unnorm_img) in enumerate(tqdm(train_dataloader)):
                 # if debug:
                 #     for ii, img in enumerate(imgs):
@@ -136,14 +141,20 @@ def main(args):
                 with torch.no_grad():
                     embeddings = backbone(imgs)
                 outputs = classifier(embeddings)
+
+                predictions_acm.append(torch.nn.functional.softmax(outputs, dim=1).detach().cpu().numpy())
+                labels_acm.append(labels.detach().cpu().numpy())
+
                 loss = ce_loss(outputs, labels)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 train_losses.update(loss.item(), bs)
-                acc, err_dict = cal_acc(outputs, labels)
-                train_acces.update(acc, bs)
+                # acc, err_dict = cal_acc(outputs, labels)
+                # train_acces.update(acc, bs)
                 last_lr = scheduler.get_last_lr()
+
+            acc_train, _ = accuracy_calc(args.save_dir, labels_acm, predictions_acm, roc_plot_en=False)
 
             scheduler.step() # lr step
             print('last_lr :', last_lr)
@@ -162,28 +173,31 @@ def main(args):
                     embeddings = backbone(imgs)
                     outputs = classifier(embeddings)
 
-                    predictions_acm.append(outputs.detach().cpu().numpy())
+                    predictions_acm.append(torch.nn.functional.softmax(outputs, dim=1).detach().cpu().numpy())
                     labels_acm.append(labels.detach().cpu().numpy())
 
                     loss = ce_loss(outputs, labels)
                     valid_losses.update(loss.item(), bs)
-                    acc, err_dict = cal_acc(outputs, labels)
-                    valid_acces.update(acc, bs)
+                    # acc, err_dict = cal_acc(outputs, labels)
+                    # valid_acces.update(acc, bs)
 
-
-            acc_val, _ = accuracy_calc(args.save_dir, labels_acm, predictions_acm, roc_plot_en=False)
+            acc_val, auc_val = accuracy_calc(args.save_dir, labels_acm,
+                                             predictions_acm, roc_plot_en=True,
+                                             unique_id='validation')
 
             s = ('%10s' * 1 + '%10.4g' * 3) % (
-                '%g/%g' % (epoch, args.epoch - 1), acc, train_losses.avg, valid_losses.avg)
+                '%g/%g' % (epoch, args.epoch - 1), acc_val, train_losses.avg, valid_losses.avg)
             with open(results_file, 'a') as f:
                 f.write(s + '\n')  # append metrics, val_loss
+            print("AUC_VAL: {}".format(auc_val))
+            print(f"Epoch: {epoch+1} | train loss: {train_losses.avg:.4f} | train acc: {acc_train*100:.1f} | valid loss: {valid_losses.avg:.4f} | valid acc: {acc_val*100:.1f} ")
 
-            print(f"Epoch: {epoch+1} | train loss: {train_losses.avg:.4f} | train acc: {acc*100:.1f} | valid loss: {valid_losses.avg:.4f} | valid acc: {acc_val*100:.1f} ")
-
-            if valid_acces.avg > best_acc:
-                best_acc = valid_acces.avg
+            if acc_val > best_acc:
+                best_acc = acc_val
                 torch.save(classifier.state_dict(), model_save_root)
                 print(f"Save best model at epoch {epoch+1}.")
+
+
     else: # load pretrained model for test set only
         model_save_root = os.path.join(args.output_folder,
                                        args.cls_model_name)  # osp.join(args.output_folder, args.cls_model_name)
@@ -233,11 +247,11 @@ def test_eval(args, backbone, ce_loss, debug_save_path, fc_dim, global_crops_siz
 
             embeddings = backbone(imgs)
             outputs = classifier(embeddings)
-            predictions_acm.append(outputs.detach().cpu().numpy())
+            predictions_acm.append(torch.nn.functional.softmax(outputs, dim=1).detach().cpu().numpy())
             labels_acm.append(labels.detach().cpu().numpy())
             loss = ce_loss(outputs, labels)
             test_losses.update(loss.item(), bs)
-            acc, err_dict = cal_acc(outputs, labels, threshold=0.6)
+            _, err_dict = cal_acc(outputs, labels, threshold=0.6)
             if plot_err_ex:
                 if any(err_dict['err_ind']):
                     for ii, conf in zip(err_dict['err_ind'], err_dict['conf_acm']):
@@ -247,13 +261,16 @@ def test_eval(args, backbone, ce_loss, debug_save_path, fc_dim, global_crops_siz
                             cv2.cvtColor(unnorm_img[ii, ...].detach().cpu().permute(1, 2, 0).numpy() * 255,
                                          cv2.COLOR_RGB2BGR))
 
-            test_acces.update(acc, bs)
-    acc_test, auc_test = accuracy_calc(args.save_dir, labels_acm, predictions_acm, roc_plot_en=roc_plot_en)
+            # test_acces.update(acc, bs)
+    acc_test, auc_test = accuracy_calc(args.save_dir, labels_acm, predictions_acm, roc_plot_en=roc_plot_en, unique_id='test')
     test_results_file = os.path.join(args.save_dir, 'test_results.txt')
     s = ('%10s' * 1 + '%10.4g' * 3) % (
         '%g/%g' % (1, 1), acc_test, auc_test, imgs.shape[-1])
     with open(test_results_file, 'a') as f:
         f.write(s + '\n')  # append metrics, val_loss
+
+    print("AUC TEST: {}".format(auc_test))
+
     print(f"Test loss: {test_losses.avg:.4f} | test acc: {acc_test * 100:.1f}")
 
 

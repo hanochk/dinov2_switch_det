@@ -14,6 +14,19 @@ LABEL_MAP = {
 from torch.utils.data import Dataset, DataLoader
 import albumentations as A
 
+class GaussianBlur(transforms.RandomApply):
+    """
+    Apply Gaussian Blur to the PIL image.
+    """
+
+    def __init__(self, *, p: float = 0.5, radius_min: float = 0.1, radius_max: float = 2.0):
+        # NOTE: torchvision is applying 1 - probability to return the original image
+        keep_p = 1 - p
+        transform = transforms.GaussianBlur(kernel_size=9, sigma=(radius_min, radius_max))
+        super().__init__(transforms=[transform], p=keep_p)
+
+
+
 collect_metadata = True
 import pandas as pd
 class CustomImageDataset(Dataset):
@@ -37,12 +50,16 @@ class CustomImageDataset(Dataset):
         if collect_metadata:
             self.df = pd.DataFrame(labels_acm)
     # Image transformations
-        if 0:
-            self.transform = transforms.Compose([
-                transforms.Resize((crop_size, crop_size)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)
-            ])
+
+        self.color_jittering = transforms.Compose(
+            [
+                transforms.RandomApply(
+                    [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+                    p=0.8,
+                ),
+                transforms.RandomGrayscale(p=0.2),
+            ]
+        )
         # if model == "dinov2":
         # mean = [0.485, 0.456, 0.406] # imageNet
         mean = [0.39933288, 0.34880158, 0.28759238] # railvision
@@ -54,7 +71,7 @@ class CustomImageDataset(Dataset):
                 transforms.ToTensor(),
                 transforms.Resize((crop_size, crop_size)),
                 # transforms.ColorJitter(brightness=(0.6, 1.4), contrast=(0.6, 1.4), saturation=(0.6, 1.4)),
-                transforms.ColorJitter(brightness=0.25, contrast=0.2, saturation=0.2, hue=0.1),  # https://github.com/facebookresearch/dinov2/blob/e1277af2ba9496fbadf7aec6eba56e8d882d1e35/dinov2/data/augmentations.py#L64
+                # transforms.ColorJitter(brightness=0.25, contrast=0.2, saturation=0.2, hue=0.1),  # https://github.com/facebookresearch/dinov2/blob/e1277af2ba9496fbadf7aec6eba56e8d882d1e35/dinov2/data/augmentations.py#L64
                 # transforms.CenterCrop(crop_size),
                 normalize,
             ])

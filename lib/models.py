@@ -55,7 +55,6 @@ class Classifier(nn.Module):
         )
         self.fc2 = nn.Sequential(
             nn.Linear(self.fc1_dim, n_cls),
-            nn.Softmax(), 
         )
         self._init_weights(module=self.fc1)
         self._init_weights(module=self.fc2)
