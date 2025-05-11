@@ -19,6 +19,15 @@ def get_args():
     parser.add_argument('--global-crops-size', type=int, default=-1, help='')
     parser.add_argument('--var-hidden-dim', action='store_true', help='')
 
+    parser.add_argument('--flip-hor', action='store_true', help='')
+    parser.add_argument('--gaussiansolar', action='store_true', help='')
+    parser.add_argument('--colorjitter', action='store_true', help='')
+    parser.add_argument('--affine', action='store_true', help='')
+    parser.add_argument('--crop-upper', action='store_true', help='')
+    parser.add_argument('--predefined-seed', action='store_true', help='predefined_seed only set it to constant otherwise add args that load the random one ')
+
+
+
 
 
 

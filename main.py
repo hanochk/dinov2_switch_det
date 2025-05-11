@@ -9,7 +9,7 @@ from lib.evaluation import accuracy_calc
 from lib.models import load_backbone, load_classifier
 from lib.datasets import get_dataloader
 from tqdm import tqdm
-from lib.utils import AverageMeter, cal_acc, increment_path
+from lib.utils import AverageMeter, cal_acc, increment_path, init_seeds
 from config import get_args
 import cv2
 import numpy as np
@@ -18,21 +18,33 @@ import math
 import torch.optim.lr_scheduler as lr_scheduler
 import yaml
 from torchinfo import summary
-
+import time
 def main(args):
     # base_save_path =
     # HK TODO add Wdecay, dropout, cosine anealing, or lr decay
-    debug = True
     flavour = 'base'
     overfitting_test = False
     if overfitting_test:
         print('overfitting test', 19*'=')
+
+    if args.predefined_seed:
+        rank = 0
+        hyp_seed = 2 + rank
+        init_seeds(2 + rank)
+    else:
+        rand_seed = int(time.time())
+        hyp_seed = rand_seed
+        init_seeds(rand_seed)
+
+    args.hyp_seed = hyp_seed
+
     # train_set_path = '/mnt/Data/hanoch/back_switch/sw_v0.7_bsw_v2.8/train'
     # val_set_path = '/mnt/Data/hanoch/back_switch/backswitch_detection/validation'
     # test_set_path = '/mnt/Data/hanoch/back_switch/sw_v0.7_bsw_v2.8/test'
     train_set_path = '/mnt/Data/hanoch/back_switch/backswitch_detection/train'
     val_set_path = '/mnt/Data/hanoch/back_switch/backswitch_detection/validation'
     test_set_path = '/mnt/Data/hanoch/back_switch/backswitch_detection/test'
+
 
     backbone = load_backbone(model=args.backbone_model, flavour=flavour)
     if flavour == 'small':
@@ -66,8 +78,8 @@ def main(args):
 
         print('Saved dir ==========================', args.save_dir)
 
+        print(vars(args))
         results_file = os.path.join(args.save_dir , 'results.txt')
-
         with open(os.path.join(args.save_dir ,  'opt.yaml'), 'w') as f:
             yaml.dump(vars(args), f, sort_keys=False)
 
@@ -96,17 +108,23 @@ def main(args):
 
             # lf = one_cycle(1, lrf, args.epoch)  # cosine 1->hyp['lrf']
 
-
         if 1:
              # 224
             train_dataloader = create_dataloader(train_set_path, crop_size=global_crops_size,
                                                  num_workers=args.num_workers,
-                                                 batch_size=64, shuffle=True)
+                                                 batch_size=64, shuffle=True,
+                                                 augment=True,
+                                                 flip_hor=args.flip_hor, gaussiansolar=args.gaussiansolar,
+                                                 colorjitter=args.colorjitter,
+                                                 affine=args.affine,
+                                                 crop_upper=args.crop_upper)
+
             train_dataloader.dataset.df.to_csv(os.path.join(args.save_dir, 'training_set.csv'))
             print("Train Class 0, 1 distribution",
                    np.unique([x[1] for x in train_dataloader.dataset.samples], return_counts=True))
 
-            valid_dataloader = create_dataloader(val_set_path, crop_size=global_crops_size, num_workers=args.num_workers, batch_size=64, shuffle=False)
+            valid_dataloader = create_dataloader(val_set_path, crop_size=global_crops_size, num_workers=args.num_workers, batch_size=64, shuffle=False,
+                                                 crop_upper=args.crop_upper)
             valid_dataloader.dataset.df.to_csv(os.path.join(args.save_dir, 'val_set.csv'))
             print("Val Class 0, 1 distribution",
                np.unique([x[1] for x in valid_dataloader.dataset.samples], return_counts=True))
@@ -125,14 +143,15 @@ def main(args):
         for epoch in range(args.epoch):
             classifier.train()
             train_losses = AverageMeter()
-            train_acces = AverageMeter()
+            # train_acces = AverageMeter()
             labels_acm = list()
             predictions_acm = list()
+            debug = False
 
             for ix , (imgs, labels, unnorm_img) in enumerate(tqdm(train_dataloader)):
-                # if debug:
-                #     for ii, img in enumerate(imgs):
-                #         cv2.imwrite(os.path.join(debug_save_path, str(ii+ix*args.batch_size)+ '.png'), img.detach().cpu().permute(1, 2, 0).numpy()*255)
+                if debug:
+                    plot_pre_processed_images(args, debug_save_path, imgs, ix, labels, unnorm_img)
+
                 # cv2.imwrite(os.path.join(debug_save_path, str('img0')+ '.png'), cv2.cvtColor(train_dataloader.dataset.__getitem__(0)[2].permute(1,2,0).cpu().numpy()*255, cv2.COLOR_RGB2BGR))
                 imgs = imgs.cuda()
                 labels = labels.cuda()
@@ -186,13 +205,13 @@ def main(args):
                                              unique_id='validation')
 
             s = ('%10s' * 1 + '%10.4g' * 3) % (
-                '%g/%g' % (epoch, args.epoch - 1), acc_val, train_losses.avg, valid_losses.avg)
+                '%g/%g' % (epoch, args.epoch - 1), auc_val, train_losses.avg, valid_losses.avg)
             with open(results_file, 'a') as f:
                 f.write(s + '\n')  # append metrics, val_loss
             print("AUC_VAL: {}".format(auc_val))
             print(f"Epoch: {epoch+1} | train loss: {train_losses.avg:.4f} | train acc: {acc_train*100:.1f} | valid loss: {valid_losses.avg:.4f} | valid acc: {acc_val*100:.1f} ")
 
-            if acc_val > best_acc:
+            if acc_val > best_acc: # HK TODO add save each 10 epochs for ES
                 best_acc = acc_val
                 torch.save(classifier.state_dict(), model_save_root)
                 print(f"Save best model at epoch {epoch+1}.")
@@ -209,7 +228,7 @@ def main(args):
 
     if 1:
         test_dataloader = create_dataloader(test_set_path, crop_size=global_crops_size, num_workers=args.num_workers,
-                                            batch_size=64, shuffle=False)
+                                            batch_size=64, shuffle=False, crop_upper=args.crop_upper)
         test_dataloader.dataset.df.to_csv(os.path.join(args.save_dir, 'test_set.csv'))
 
         roc_plot_en = True
@@ -226,6 +245,24 @@ def main(args):
 
     test_eval(args, backbone, ce_loss, debug_save_path, fc_dim,
               global_crops_size, model_save_root, test_dataloader, roc_plot_en=roc_plot_en)
+
+
+def plot_pre_processed_images(args, debug_save_path, imgs, ix, labels, unnorm_img):
+    from skimage import io
+    import imageio
+    for ii, (img, lbl, un_img) in enumerate(zip(imgs, labels, unnorm_img)):
+        # cv2.imwrite(os.path.join(debug_save_path, str(ii + ix * args.batch_size) + '_lbl_' + str(lbl.item()) + '.png'),
+        #             img.detach().cpu().permute(1, 2, 0).numpy() * 255)
+        cv2.imwrite(
+            os.path.join(debug_save_path, str(ii + ix * args.batch_size) + '_lbl_unnormed_' + str(lbl.item()) + '.png'),
+            (un_img.detach().cpu().permute(1, 2, 0).numpy() * 255).astype('uint8'))
+        # io.imsave(os.path.join(debug_save_path, str(ii+ix*args.batch_size)+ '_lbl_'+ str(lbl.item()) +'skimage.png'), (img.detach().cpu().permute(1, 2, 0).numpy()*255).astype('uint8'))  # Save the image
+        imageio.imwrite(os.path.join(debug_save_path, str(ii + ix * args.batch_size) + '_lbl_' + str(lbl.item()) + 'imio_trans_yy.png'),
+                  (un_img.detach().cpu().permute(1, 2, 0).numpy()*255).astype('uint8'))  # Save the image
+
+        # imageio.imwrite(os.path.join(debug_save_path,
+        #                              str(ii + ix * args.batch_size) + '_lbl_' + str(lbl.item()) + 'imio.png'),
+        #                 (img.detach().cpu().permute(1, 2, 0).numpy() * 255).astype('uint8'))  # Save the image
 
 
 def test_eval(args, backbone, ce_loss, debug_save_path, fc_dim, global_crops_size, model_save_root,
@@ -308,4 +345,7 @@ training
     
     test set only
     --epoch 20 --batch-size 32 --output-folder /mnt/Data/hanoch/runs/dinov2_classifier --dropout 0.2 --task test --output-folder /mnt/Data/hanoch/runs/dinov2_classifier/runs/train/dinov26
+    
+    # HK TODO consider mild FT for the DInoV2
+Randomize training
     """

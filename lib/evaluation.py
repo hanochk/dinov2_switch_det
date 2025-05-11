@@ -153,6 +153,7 @@ def roc_plot(labels, predictions, positive_label, save_dir, thresholds_every=5, 
 
     filename = unique_id + 'roc_curve.png'
     plt.savefig(os.path.join(save_dir, filename), format="png")
+    plt.close()
     return auc
 
 def p_r_plot_multi_class(all_targets, all_predictions, save_dir, thresholds_every_in=5, unique_id=None):
